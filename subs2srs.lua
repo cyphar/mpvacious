@@ -50,6 +50,10 @@ local config = {
     tie_volumes = false,           -- if set to true, the volume of the outputted audio file depends on the volume of the player at the time of export
     menu_font_size = 25,
 
+    -- Expert Options
+    mpv_extract_audio_flags = "",       -- additional flags passed to mpv when extracting audio (space-separated, with \-escapes)
+    mpv_extract_screenshot_flags = "",  -- additional flags passed to mpv when extracting screenshots (space-separated, with \-escapes)
+
     -- Anki
     create_deck = false,                -- automatically create a deck for new cards
     deck_name = "Learning",             -- name of the deck for new cards
@@ -890,6 +894,35 @@ end
 
 encoder = {}
 
+encoder.split_cmd_args = function(args)
+    local split_args = {}
+
+    local idx = 1
+    local start_idx = 1
+    while idx <= #args do
+        local ch = string.sub(args, idx, idx)
+        if ch == "\\" then
+            -- skip next character
+            idx = idx + 1
+        elseif ch == " " then
+            -- split the string on this space, and then apply the "\" escaping.
+            local arg = string.sub(args, start_idx, idx - 1)
+            arg, _ = string.gsub(arg, "\\(.)", "%1")
+            table.insert(split_args, arg)
+            -- skip over any subsequent spaces
+            local _, end_idx = string.find(args, "^% +", idx)
+            start_idx = end_idx + 1
+        end
+        idx = idx + 1
+    end
+    if start_idx < #args then
+        local arg = string.sub(args, start_idx)
+        arg, _ = string.gsub(arg, "\\(.)", "%1")
+        table.insert(split_args, arg)
+    end
+    return split_args
+end
+
 encoder.pad_timings = function(start_time, end_time)
     local video_duration = mp.get_property_number('duration')
     if config.audio_padding == 0.0 or not video_duration then
@@ -930,11 +963,14 @@ encoder.create_snapshot = function(timestamp, filename)
         '--ovcopts-add=lossless=0',
         '--ovcopts-add=compression_level=6',
         table.concat { '--ovc=', config.snapshot_codec },
-        table.concat { '-start=', timestamp },
+        table.concat { '--start=', timestamp },
         table.concat { '--ovcopts-add=quality=', tostring(config.snapshot_quality) },
         table.concat { '--vf-add=scale=', config.snapshot_width, ':', config.snapshot_height },
         table.concat { '-o=', output_path }
     }
+    for _, arg in ipairs(encoder.split_cmd_args(config.mpv_extract_screenshot_flags)) do
+        table.insert(args, arg)
+    end
     local on_finish = function()
         ankiconnect.store_file(filename, output_path)
         os.remove(output_path)
@@ -974,6 +1010,9 @@ encoder.create_audio = function(start_timestamp, end_timestamp, filename)
         table.concat { '--oacopts-add=b=', config.audio_bitrate },
         table.concat { '-o=', output_path }
     }
+    for _, arg in ipairs(encoder.split_cmd_args(config.mpv_extract_audio_flags)) do
+        table.insert(args, arg)
+    end
     local on_finish = function()
         ankiconnect.store_file(filename, output_path)
         os.remove(output_path)
